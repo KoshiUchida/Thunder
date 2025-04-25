@@ -1,237 +1,109 @@
 #include <iostream>
 #include <vector>
-#include <Windows.h>
-#include <time.h>
 #include <random>
+#include <chrono>
+#include <thread>
+#include <algorithm>
+#include <string>
 
 using namespace std;
 
-void Draw(const vector<vector<int>>& map, int size);
+constexpr int MapSize = 50;
+constexpr int Rage = 2;
+constexpr int SubLife = 5;
 
-void Thunder(vector<vector<int>>& map, int size);
+struct Position {
+    int x, y;
+};
 
-int main(void)
-{
-	srand(time(NULL));
+struct Mouse {
+    Position pos;
+    Position rota;
+    int life;
+};
 
-	static constexpr int MapSize{ 50 };
+void Draw(const vector<vector<int>>& map);
+void Thunder(vector<vector<int>>& map, mt19937& rng);
 
-	vector<vector<int>> map;
-	while (true)
-	{
+int main() {
+    random_device rd;
+    mt19937 rng(rd());
 
-		for (int i{ 0 }; i < MapSize; i++)
-		{
-			vector<int> width;
-			for (int j{ 0 }; j < MapSize; j++)
-				width.push_back(0);
-			map.push_back(width);
-		}
+    vector<vector<int>> map(MapSize, vector<int>(MapSize));
 
-		map[0][MapSize / 2] = 1;
-		//map[1][MapSize / 2] = 1;
+    while (true) {
+        fill(map.begin(), map.end(), vector<int>(MapSize, 0));
+        map[0][MapSize / 2] = 1;
 
-		//int count{};
-		 
-		
-		//count++;
+        Thunder(map, rng);
+        Draw(map);
 
-		Thunder(map, MapSize);
-		Draw(map, MapSize);
-		
-		//Sleep(500);
+        string input;
+        cout << "[Enter] で次 / n で終了 > ";
+        getline(cin, input);
+        if (input == "n") break;
+    }
 
-		string input;
-		cin >> input;
-
-		//if (count % 20 == 0)
-		//	Draw(map, MapSize);
-
-		//for (int i{ 0 }; i < MapSize; i++)
-		//{
-		//	if (map[MapSize - 1][i])
-		//		count = 300;
-		//}
-
-		if (input == "n")
-			break;
-
-		map.clear();
-	}
-
-	return 0;
+    return 0;
 }
 
-void Draw(const vector<vector<int>>& map, int size)
-{
-	for (int i{ 0 }; i < size; i++)
-		cout << "--";
-	cout << endl;
-
-	for (int i{ 0 }; i <  size; i++)
-	{
-		for (int j{ 0 }; j < size; j++)
-		{
-			if (map[i][j])
-				cout << "口";
-			else
-				cout << "　";
-		}
-		cout << endl;
-	}
-	cout << endl;
-
-	for (int i{ 0 }; i < size; i++)
-		cout << "--";
-	cout << endl;
+void Draw(const vector<vector<int>>& map) {
+    cout << string(MapSize * 2, '-') << endl;
+    for (const auto& row : map) {
+        for (int cell : row)
+            cout << (cell ? "口" : "　");
+        cout << endl;
+    }
+    cout << string(MapSize * 2, '-') << endl;
 }
 
-void Thunder(vector<vector<int>>& map, int size)
-{
-	struct Position
-	{
-		int x;
-		int y;
-	};
+void Thunder(vector<vector<int>>& map, mt19937& rng) {
+    uniform_int_distribution<> rageDist(0, Rage - 1);
+    uniform_int_distribution<> dirDist(0, 1);
+    uniform_int_distribution<> branchChance(0, 2);
 
-	Position mainMouse{};
-	Position rotate{0, 1};
+    Position mainMouse = { MapSize / 2, 0 };
+    Position rotate = { 0, 1 };
 
-	for (int i{ 0 }; i < size; i++)
-	{
-		for (int j{ 0 }; j < size; j++)
-		{
-			if (map[i][j])
-			{
-				mainMouse = { j, i };
-				i = size;
-				break;
-			}
-		}
-	}
+    vector<Mouse> mouses;
 
-	struct Mouse
-	{
-		Position pos;
-		Position rota;
-		int life;
-	};
+    while (mainMouse.y < MapSize - 1) {
+        mainMouse.x += rotate.x;
+        mainMouse.y += rotate.y;
 
-	vector<Mouse> mouses;
+        if (mainMouse.x > 0) map[mainMouse.y][mainMouse.x - 1] = 1;
+        map[mainMouse.y][mainMouse.x] = 1;
+        if (mainMouse.x < MapSize - 1) map[mainMouse.y][mainMouse.x + 1] = 1;
 
+        // ランダム分岐
+        if (rageDist(rng) == 0) {
+            rotate.x += (dirDist(rng) == 0) ? 1 : -1;
+            if (rotate.x > 1) rotate.x = -1;
+            else if (rotate.x < -1) rotate.x = 1;
 
-	// メインが地面に付くまでループ
-	while (mainMouse.y < size - 1)
-	{
-		mainMouse.x += rotate.x;
-		mainMouse.y += rotate.y;
+            if (dirDist(rng) == 0) {
+                int branchX = rotate.x + ((branchChance(rng) == 0) ? 1 : -1);
+                branchX = max(-1, min(1, branchX));
+                mouses.push_back(Mouse{ mainMouse, {branchX, 1}, SubLife });
+            }
+        }
 
-		if (0 <= mainMouse.x && mainMouse.x < size)
-		{
-			if (0 < mainMouse.x)
-				map[mainMouse.y][mainMouse.x - 1] = 1;
-			map[mainMouse.y][mainMouse.x] = 1;
-			if (mainMouse.x < size - 1)
-				map[mainMouse.y][mainMouse.x + 1] = 1;
-		}
+        // サブ雷の更新
+        for (auto& m : mouses) {
+            if (m.life > 0) {
+                m.pos.x += m.rota.x;
+                m.pos.y += m.rota.y;
 
-		// 衝突する確率
-		static constexpr int Rages{ 2 };
-		if (rand() % Rages == 0)
-		{
-			rotate.x += (rand() % 2 == 0) ? 1 : -1;
-			if (rotate.x > 1)
-				rotate.x = -1;
-			else if (rotate.x < -1)
-				rotate.x = 1;
+                if (m.pos.x >= 0 && m.pos.x < MapSize && m.pos.y < MapSize)
+                    map[m.pos.y][m.pos.x] = 1;
 
-			if (rand() % 2 == 0)
-			{
-				Mouse newMouse{ mainMouse, {rotate.x += (rand() % 3 == 0) ? 1 : -1, rotate.y}, 5 };
-				mouses.push_back(newMouse);
-			}
-		}
+                m.life--;
+            }
+        }
 
-		for (int i{ 0 }; i < mouses.size(); i++)
-		{
-			if (mouses[i].life > 0)
-			{
-				mouses[i].pos.x += mouses[i].rota.x;
-				if (mouses[i].rota.x > 1)
-					mouses[i].rota.x = -1;
-				else if (mouses[i].rota.x < -1)
-					mouses[i].rota.x = 1;
-				mouses[i].pos.y += mouses[i].rota.y;
-
-				if (0 <= mouses[i].pos.x && mouses[i].pos.x < size && mouses[i].pos.y < size)
-					map[mouses[i].pos.y][mouses[i].pos.x] = 1;
-
-				mouses[i].life--;
-
-				//if (rand() % 6 == 0)
-				//{
-				//	mouses[i].rota.x += (rand() % 2 == 0) ? 1 : -1;
-				//	if (mouses[i].rota.x > 1)
-				//		mouses[i].rota.x = -1;
-				//	else if (mouses[i].rota.x < -1)
-				//		mouses[i].rota.x = 1;
-
-				//	Mouse newMouse{ mouses[i].pos, {mouses[i].rota.x += (rand() % 3 == 0) ? 1 : -1, mouses[i].rota.y}, 5};
-				//	mouses.push_back(newMouse);
-				//}
-			}
-			else
-			{
-				mouses.erase(mouses.begin() + i);
-				i--;
-			}
-		}
-	}
-
-	mouses.clear();
+        // 消滅処理
+        mouses.erase(remove_if(mouses.begin(), mouses.end(), [](const Mouse& m) {
+            return m.life <= 0;
+            }), mouses.end());
+    }
 }
-
-//void Thunder(vector<vector<int>>& map, int size)
-//{
-//	while (true)
-//	{
-//		int count{};
-//
-//		for (int i{ 0 }; i < size; i++)
-//		{
-//			for (int j{ 0 }; j < size; j++)
-//			{
-//				if (map[i][j])
-//					count++;
-//
-//				int OneCount{ 1 };
-//
-//				if (i - 1 >= 0 && map[i - 1][j])
-//					OneCount += 16;
-//				if (i - 2 >= 0 && map[i - 2][j])
-//					OneCount -= 10;
-//				if (i + 1 <= size - 1 && map[i + 1][j])
-//					OneCount -= 10;
-//				if (i + 2 <= size - 2 && map[i + 2][j])
-//					OneCount -= 5;
-//				if (i - 1 >= 0 && j - 1 >= 0 && map[i - 1][j - 1])
-//					OneCount += 5;
-//				if (i - 1 >= 0 && j + 1 <= size - 1 && map[i - 1][j + 1])
-//					OneCount += 5;
-//				if (i + 1 <= size - 1 && j - 1 >= 0 && map[i + 1][j - 1])
-//					OneCount++;
-//				if (i + 1 <= size - 1 && j + 1 <= size - 1 && map[i + 1][j + 1])
-//					OneCount++;
-//
-//				if (!map[i][j] && OneCount > 1 && rand() % (size * size / OneCount) == 0)
-//				{
-//					map[i][j] = 1;
-//					return;
-//				}
-//			}
-//		}
-//
-//		if (count == size * size)
-//			break;
-//	}
-//}
